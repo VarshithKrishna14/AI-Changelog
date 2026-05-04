@@ -1,0 +1,12 @@
+services:
+  narrator:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist the SQLite database and .env between container restarts
+      - ./corsair.db:/app/corsair.db
+      - ./.env:/app/.env:ro
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped

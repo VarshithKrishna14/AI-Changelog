@@ -1,0 +1,27 @@
+{
+  "name": "ai-changelog-narrator",
+  "version": "1.0.0",
+  "description": "Tag a GitHub release. Your AI writes the changelog and tells the world — Slack + Notion.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@corsair-dev/github": "^0.1.0",
+    "@corsair-dev/notion": "^0.1.0",
+    "@corsair-dev/slack": "^0.1.0",
+    "corsair": "^0.1.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.3",
+    "openai": "^4.104.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.7",
+    "tsx": "^4.8.2",
+    "typescript": "^5.4.5"
+  }
+}
