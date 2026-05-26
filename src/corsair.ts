@@ -3,6 +3,7 @@ import { createCorsair } from 'corsair';
 import { github } from '@corsair-dev/github';
 import { slack } from '@corsair-dev/slack';
 import { notion } from '@corsair-dev/notion';
+import { rawDbInput } from './db.js';
 
 function requireEnv(key: string): string {
   const value = process.env[key];
@@ -18,53 +19,63 @@ function requireFirstEnv(keys: string[]): string {
   throw new Error(`One of ${keys.join(', ')} is required in .env`);
 }
 
+/**
+ * Permission mode for write-capable plugins (Slack, Notion).
+ *
+ * | REQUIRE_APPROVAL | mode    | read  | write (messages.post, pages.createPage)  |
+ * |------------------|---------|-------|------------------------------------------|
+ * | false (default)  | open    | allow | allow — posts immediately                |
+ * | true             | strict  | allow | require_approval — parks in DB, throws   |
+ *
+ * The error thrown when blocked contains the approval token via formatAsyncMessage.
+ * POST /approve/:token executes the stored call; GET /deny/:token discards it.
+ */
+export const writeMode: 'open' | 'strict' =
+  process.env.REQUIRE_APPROVAL === 'true' ? 'strict' : 'open';
+
 export const corsair = createCorsair({
   plugins: [
     github({
       credentials: { token: requireFirstEnv(['GITHUB_TOKEN', 'GITHUB_API_KEY']) },
       webhookSecret: process.env.GITHUB_WEBHOOK_SECRET,
-      webhookHooks: {
-        release: {
-          // Fires when a GitHub release is published (not a draft)
-          published: {
-            after: async (_ctx, result) => {
-              const payload = result as unknown as GitHubReleasePublishedPayload;
-
-              console.log(`[webhook] release.published: ${payload.release?.tag_name ?? 'unknown tag'}`);
-
-              // Don't process draft or pre-releases unless configured
-              if (payload.release?.draft) {
-                console.log('[webhook] Skipping draft release');
-                return;
-              }
-
-              try {
-                // Dynamic import breaks the corsair ↔ pipeline circular dependency
-                const { runPipeline } = await import('./pipeline.js');
-                await runPipeline({
-                  release: payload.release,
-                  repository: payload.repository,
-                });
-              } catch (err) {
-                console.error('[webhook] Pipeline failed:', err);
-              }
-            },
-          },
-        },
-      },
+      // This project only reads from GitHub — lock it down.
+      permissions: { mode: 'readonly' },
     }),
 
     slack({
       key: requireFirstEnv(['SLACK_BOT_TOKEN', 'SLACK_KEY']),
       signingSecret: process.env.SLACK_SIGNING_SECRET,
+      // 'strict'  → messages.post is intercepted; token stored in corsair_permissions.
+      // 'open'    → messages.post executes immediately (default).
+      permissions: { mode: writeMode },
     }),
+
     notion({
       key: requireFirstEnv(['NOTION_API_KEY', 'NOTION_KEY']),
+      // 'strict'  → pages.createPage is intercepted; token stored in corsair_permissions.
+      // 'open'    → pages.createPage executes immediately (default).
+      permissions: { mode: writeMode },
     }),
   ],
-  // Required by Corsair type signature. Credentials are provided directly via plugin options.
+
+  // Wire Corsair's built-in permission system to our SQLite database.
+  // Pass the raw adapter so createCorsair can wrap it with its own dialect + plugin.
+  // Without this, require_approval falls back to deny.
+  database: rawDbInput,
+
+  // Required by Corsair type signature.
   kek: process.env.CORSAIR_KEK ?? 'dev-only-kek-replace-in-production',
   multiTenancy: false,
+
+  approval: {
+    timeout: '1h',
+    onTimeout: 'deny',
+    mode: 'asynchronous',
+    // Embed the token in the error message thrown to the pipeline caller.
+    // Pattern: CORSAIR:APPROVAL_REQUIRED token=<hex> plugin=<id> endpoint=<path>
+    formatAsyncMessage: ({ token, plugin, endpoint }) =>
+      `CORSAIR:APPROVAL_REQUIRED token=${token} plugin=${plugin} endpoint=${endpoint}`,
+  },
 });
 
 // ---- Payload types from the GitHub release.published webhook ----
@@ -95,11 +106,4 @@ export interface GitHubRepository {
   owner: {
     login: string;
   };
-}
-
-export interface GitHubReleasePublishedPayload {
-  action: 'published';
-  release: GitHubRelease;
-  repository: GitHubRepository;
-  sender: { login: string };
 }
