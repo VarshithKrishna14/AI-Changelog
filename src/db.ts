@@ -75,9 +75,51 @@ class NodeSqliteAdapter {
 
 const rawDb = new DatabaseSync(dbPath);
 
-// Create the corsair_permissions table on first run.
-// Only this table is needed — we use direct plugin credentials, not DB-backed auth.
+// Create all Corsair tables on first run.
+// When a database is connected to createCorsair, Corsair uses DB-backed credential
+// storage for every plugin. All five tables must exist or key lookups and entity
+// caching will throw "Integration not found" / "Failed to save" warnings.
 rawDb.exec(`
+  CREATE TABLE IF NOT EXISTS corsair_integrations (
+    id          TEXT     PRIMARY KEY,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    name        TEXT     NOT NULL UNIQUE,
+    config      TEXT,
+    dek         TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS corsair_accounts (
+    id             TEXT     PRIMARY KEY,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tenant_id      TEXT     NOT NULL,
+    integration_id TEXT     NOT NULL,
+    config         TEXT,
+    dek            TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS corsair_entities (
+    id           TEXT     PRIMARY KEY,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    account_id   TEXT     NOT NULL,
+    entity_id    TEXT     NOT NULL,
+    entity_type  TEXT     NOT NULL,
+    version      TEXT     NOT NULL,
+    data         TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS corsair_events (
+    id          TEXT     PRIMARY KEY,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    account_id  TEXT     NOT NULL,
+    event_type  TEXT     NOT NULL,
+    payload     TEXT,
+    status      TEXT     NOT NULL DEFAULT 'pending'
+  );
+
   CREATE TABLE IF NOT EXISTS corsair_permissions (
     id          TEXT     PRIMARY KEY,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -90,7 +132,7 @@ rawDb.exec(`
     status      TEXT     NOT NULL DEFAULT 'pending',
     expires_at  TEXT     NOT NULL,
     error       TEXT
-  )
+  );
 `);
 
 console.log(`[db] SQLite database ready at ${dbPath}`);
